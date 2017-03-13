@@ -4,94 +4,131 @@ cat("\014")
 library(simpleboot)
 library(dplyr)
 library(repr)
-read.file = function(file = 'grad-students.csv'){
-  ## Read the csv file
-  gradstudents <- read.csv(file, header = TRUE, 
-                         stringsAsFactors = FALSE)
-  
-  ## Coerce some character columns to numeric
-  #numcols <- c('price', 'bore', 'stroke', 'horsepower', 'peak.rpm')
-  #auto.price[, numcols] <- lapply(auto.price[, numcols], as.numeric)
-  
-  ## Remove cases or rows with missing values. In this case we keep the 
-  ## rows which do not have nas. 
-  gradstudents[complete.cases(gradstudents), ]
-}
-
+source('Loaddata.R')
+source('ZScoreNormalise.R')
 # Load and cleanse the csv file.
-gradstudents = read.file()
-# Show first 10 records.
-head(gradstudents)
-#Log of price data
-logprice <- log(price)
+allages = Loaddata('all-ages.csv')
+gradstudents = Loaddata('grad-students.csv')
+recentgrads = Loaddata('recent-grads.csv')
+#Check out the structure of the cleansed object.
+str((recentgrads))
+#z-Score Normalization of grad mediam income data
+df_gradstudent_median <- ZScoreNormalise(gradstudents$Grad_median)
+#z-Score Normalization of recent grad mediam income data
+df_recent_gradstudent_median <- ZScoreNormalise(recentgrads$Median)
+#Add log median and normalized log median to the graduate data frame.
+gradstudents = mutate(gradstudents,normalized_gradmedian = df_gradstudent_median$normalized_logColumn)
+#Add log median and normalized log median to the recent graduate data frame.
+recentgrads = mutate(recentgrads,normalized_gradmedian = df_recent_gradstudent_median$normalized_logColumn)
 
-#z-Score Normalization of price data
-mean_price <- mean(price)
-sd_price <- sd(price)
-normalized_price <- (price - mean_price) / sd_price
-mean_normalized_price <- mean(normalized_price)
+#z-Score Normalization of grad unemployment data
+df_gradstudent_unemployment <- ZScoreNormalise(gradstudents$Grad_unemployment_rate)
+#z-Score Normalization of recent grad unemployment data
+df_recent_gradstudent_unemployment <- ZScoreNormalise(recentgrads$Unemployment_rate)
+#Add log unemployment and normalized log unemployment to the graduate data frame.
+gradstudents = mutate(gradstudents,normalized_gradunemployment = df_gradstudent_unemployment$normalized_logColumn)
+#Add log unemployment and normalized log unemployment to the recent graduate data frame.
+recentgrads = mutate(recentgrads,normalized_gradundemployment = df_recent_gradstudent_unemployment$normalized_logColumn)
 
-#z-Score Normalization of log price data
-mean_logprice <- mean(logprice)
-sd_logprice <- sd(logprice)
-normalized_logprice <- (logprice - mean_logprice) / sd_logprice
-mean_normalized_logprice <- mean(normalized_logprice)
 
-#Add log price and normalized log price to the data frame.
-auto.price = mutate(auto.price, logprice = logprice, normalized_price = normalized_price, normalized_logprice = normalized_logprice)
+#Group data by major category
+Recent_Graduate_GroupbyMajorCategorybyMedian <-
+  recentgrads %>% group_by(Major_category) %>% summarise(normalized_gradmedian = mean(normalized_gradmedian))
+
+#Group data by unemployment
+Recent_Graduate_GroupbyMajorCategory_unemployment <-
+  recentgrads %>% group_by(Major_category) %>% summarise(normalized_gradundemployment = mean(normalized_gradundemployment))
+
+#Group data by major
+Recent_Graduate_GroupbyMajor_unemployment <-
+  recentgrads %>% group_by(Major) %>% summarise(normalized_gradundemployment = mean(normalized_gradundemployment))
+
+
+#Convert Categorical varibales into numeric
+recentgrads$Major_category_n <- as.numeric(factor(recentgrads$Major_category , levels=Recent_Graduate_GroupbyMajorCategory_unemployment$Major_category))
+#Convery Categorical variables into numeric
+recentgrads$Major_n <- as.numeric(factor(recentgrads$Major , levels=Recent_Graduate_GroupbyMajor_unemployment$Major))
+
+str(recentgrads)
+
+numeric_recentgrads1 <- data.frame(recentgrads[sapply(recentgrads,is.numeric)])
+numeric_recentgrads <- data.frame(lapply(numeric_recentgrads1, as.numeric))
+#numeric_recentgrads <- data.frame(lapply(numeric_recentgrads,as.numeric))
+str(numeric_recentgrads)
+
+#All the columns are num or integer hence we can calculate the summary of the complete dataset
+lapply(numeric_recentgrads, summary)
+# Heating.load and cooling.load is reflecting a postive skewed distribution as mean is greater than median and 1st QR is considerably different from 3rd QR.
+# Calculate standard deviation to measure the dispursion of the distribution
+lapply(numeric_recentgrads, sd)
+# Frequency Tables.
+table(numeric_recentgrads$Major_category_n)
+
+require(ggplot2)
+#Create boxplot for one variable
+ggplot(numeric_recentgrads, aes(x = factor(0), y = Major_category_n )) + geom_boxplot()
+#Create boxplot to compare two variables.
+ggplot(numeric_recentgrads, aes(x = Major_category_n, y = Major_n) + geom_boxplot() + 
+         xlab('Major Category') + ggtitle('Major category by Median'))
+
+cov(numeric_recentgrads)
+#Calculate the Pearson's correlation of between numeric attributes.
+cor(numeric_recentgrads)# Overall.Height is strongly related to Heating.load and cooling.load
+
+
 
 #Stratifying the data.
-#Stratify By Fuel Type
-logpricegroupedbyfueltypegas = auto.price %>% filter(fuel.type == 'gas')
-logpricegroupedbyfueltypediesel = auto.price %>% filter(fuel.type == 'diesel')
+#Stratify By Major Category
+loggradmediangroupedbyMajorCategory = gradstudents %>% filter(gradstudents$Major_category == 'gas')
+loggradmediangroupedbyfueltypediesel = gradstudents %>% filter(fuel.type == 'diesel')
 #Stratify by Aspiration
-logpricegroupedbyaspirationstd = auto.price %>% filter(aspiration == 'std')
-logpricegroupedbyaspirationsturbo = auto.price %>% filter(aspiration == 'turbo')
+loggradmediangroupedbyaspirationstd = gradstudents %>% filter(aspiration == 'std')
+loggradmediangroupedbyaspirationsturbo = gradstudents %>% filter(aspiration == 'turbo')
 
 #Stratify data as per body style.
-stratified_pricebody_con = auto.price %>% filter(body.style == 'convertible')
-stratified_pricebody_hat = auto.price %>% filter(body.style == 'hatchback')
-stratified_pricebody_sed = auto.price %>% filter(body.style == 'sedan')
-stratified_pricebody_wag = auto.price %>% filter(body.style == 'wagon')
-stratified_pricebody_har = auto.price %>% filter(body.style == 'hardtop')
+stratified_pricebody_con = gradstudents %>% filter(body.style == 'convertible')
+stratified_pricebody_hat = gradstudents %>% filter(body.style == 'hatchback')
+stratified_pricebody_sed = gradstudents %>% filter(body.style == 'sedan')
+stratified_pricebody_wag = gradstudents %>% filter(body.style == 'wagon')
+stratified_pricebody_har = gradstudents %>% filter(body.style == 'hardtop')
 
 #Standard mean.
-stdmeanftgas <- mean(logpricegroupedbyfueltypegas$normalized_logprice)
-stdmeanftdiesel <- mean(logpricegroupedbyfueltypediesel$normalized_logprice)
-stdmeanaspstd <- mean(logpricegroupedbyaspirationstd$normalized_logprice)
-stdmeanasptur <- mean(logpricegroupedbyaspirationsturbo$normalized_logprice)
-stdmeanbsconv <- mean(stratified_pricebody_con$normalized_logprice)
-stdmeanbshar <- mean(stratified_pricebody_har$normalized_logprice)
-stdmeanbshat <- mean(stratified_pricebody_hat$normalized_logprice)
-stdmeanbssed <- mean(stratified_pricebody_sed$normalized_logprice)
-stdmeanbswag <- mean(stratified_pricebody_wag$normalized_logprice)
+stdmeanftgas <- mean(loggradmediangroupedbyfueltypegas$normalized_gradlogmedian)
+stdmeanftdiesel <- mean(loggradmediangroupedbyfueltypediesel$normalized_gradlogmedian)
+stdmeanaspstd <- mean(loggradmediangroupedbyaspirationstd$normalized_gradlogmedian)
+stdmeanasptur <- mean(loggradmediangroupedbyaspirationsturbo$normalized_gradlogmedian)
+stdmeanbsconv <- mean(stratified_pricebody_con$normalized_gradlogmedian)
+stdmeanbshar <- mean(stratified_pricebody_har$normalized_gradlogmedian)
+stdmeanbshat <- mean(stratified_pricebody_hat$normalized_gradlogmedian)
+stdmeanbssed <- mean(stratified_pricebody_sed$normalized_gradlogmedian)
+stdmeanbswag <- mean(stratified_pricebody_wag$normalized_gradlogmedian)
 
 ## Student T-Test to calculate the mean based on Fuel Type.
-ttestftgas <- t.test(logpricegroupedbyfueltypegas$normalized_logprice, auto.price$normalized_logprice, alternative = "two.sided")
+ttestftgas <- t.test(loggradmediangroupedbyfueltypegas$normalized_gradlogmedian, gradstudents$normalized_gradlogmedian, alternative = "two.sided")
 ttestftgasestimate <- ttestftgas$estimate
 ttestftgasmean <- ttestftgasestimate[1]
-ttestftdiesel <- t.test(logpricegroupedbyfueltypediesel$normalized_logprice, auto.price$normalized_logprice, alternative = "two.sided")
+ttestftdiesel <- t.test(loggradmediangroupedbyfueltypediesel$normalized_gradlogmedian, gradstudents$normalized_gradlogmedian, alternative = "two.sided")
 ttestftdieselestimate <- ttestftdiesel$estimate
 ttestftdieselmean <- ttestftdieselestimate[1]
 
 ## Student T-Test to calculate the mean based on Aspiration.
-ttestaspstd<- t.test(logpricegroupedbyaspirationstd$normalized_logprice, auto.price$normalized_logprice, alternative = "two.sided")
+ttestaspstd<- t.test(loggradmediangroupedbyaspirationstd$normalized_gradlogmedian, gradstudents$normalized_gradlogmedian, alternative = "two.sided")
 ttestaspstdestimate <- ttestaspstd$estimate
 ttestaspstdmean <- ttestaspstdestimate[1]
-ttestaspturbo <- t.test(logpricegroupedbyaspirationsturbo$normalized_logprice, auto.price$normalized_logprice, alternative = "two.sided")
+ttestaspturbo <- t.test(loggradmediangroupedbyaspirationsturbo$normalized_gradlogmedian, gradstudents$normalized_gradlogmedian, alternative = "two.sided")
 ttestaspturboestimate <- ttestaspturbo$estimate
 ttestaspturbomean <- ttestaspturboestimate[1]
 
 ## Bootstrap the mean of the auto price grouped by aspiration
-mean.boot.aspstd = one.boot(logpricegroupedbyaspirationstd$normalized_logprice, mean, R = 100000)
-mean.boot.aspturb = one.boot(logpricegroupedbyaspirationsturbo$normalized_logprice, mean, R = 100000)
+mean.boot.aspstd = one.boot(loggradmediangroupedbyaspirationstd$normalized_gradlogmedian, mean, R = 100000)
+mean.boot.aspturb = one.boot(loggradmediangroupedbyaspirationsturbo$normalized_gradlogmedian, mean, R = 100000)
 # Retrieve mean for numerical comparision between the means using ONE BOOT method.
 NumericBoostrapMeanAspStd <- mean.boot.aspstd$t0
 NumericBoostrapMeanAspTur <- mean.boot.aspturb$t0
 
 ## Bootstrap the mean of the auto price grouped by fuel type
-mean.boot.ftgas = one.boot(logpricegroupedbyfueltypegas$normalized_logprice, mean, R = 100000)
-mean.boot.ftdiesel = one.boot(logpricegroupedbyfueltypediesel$normalized_logprice, mean, R = 100000)
+mean.boot.ftgas = one.boot(loggradmediangroupedbyfueltypegas$normalized_gradlogmedian, mean, R = 100000)
+mean.boot.ftdiesel = one.boot(loggradmediangroupedbyfueltypediesel$normalized_gradlogmedian, mean, R = 100000)
 # Retrieve mean for numerical comparision between the means using ONE BOOT method.
 NumericBoostrapMeanftgas <- mean.boot.ftgas$t0
 NumericBoostrapMeanftdiesel <- mean.boot.ftdiesel$t0
@@ -142,33 +179,33 @@ plot.diff <- function(a, cols = c('pop_A'), nbins = 80, p = 0.05){
 options(repr.plot.width=6, repr.plot.height=4)
 
 ## One Bootstrap the mean of the auto price grouped by body style
-mean.boot.bsconv = one.boot(stratified_pricebody_con$normalized_logprice, mean, R = 100000)
-mean.boot.bshar = one.boot(stratified_pricebody_har$normalized_logprice, mean, R = 100000)
-mean.boot.bshat = one.boot(stratified_pricebody_hat$normalized_logprice, mean, R = 100000)
-mean.boot.bssed = one.boot(stratified_pricebody_sed$normalized_logprice, mean, R = 100000)
-mean.boot.bswag = one.boot(stratified_pricebody_wag$normalized_logprice, mean, R = 100000)
+mean.boot.bsconv = one.boot(stratified_pricebody_con$normalized_gradlogmedian, mean, R = 100000)
+mean.boot.bshar = one.boot(stratified_pricebody_har$normalized_gradlogmedian, mean, R = 100000)
+mean.boot.bshat = one.boot(stratified_pricebody_hat$normalized_gradlogmedian, mean, R = 100000)
+mean.boot.bssed = one.boot(stratified_pricebody_sed$normalized_gradlogmedian, mean, R = 100000)
+mean.boot.bswag = one.boot(stratified_pricebody_wag$normalized_gradlogmedian, mean, R = 100000)
 
 # Two BootStrap mean of the auto price based on body style
 ## Two Bootstrap : Difference in means of Hardtop & Convertible
-two.boot.mean.bsharconv = two.boot(stratified_pricebody_har$normalized_logprice,stratified_pricebody_con$normalized_logprice,mean, R = 100000)
+two.boot.mean.bsharconv = two.boot(stratified_pricebody_har$normalized_gradlogmedian,stratified_pricebody_con$normalized_gradlogmedian,mean, R = 100000)
 ## Two Bootstrap : Difference in means of Hatchback & Convertible
-two.boot.mean.bshatconv = two.boot(stratified_pricebody_hat$normalized_logprice,stratified_pricebody_con$normalized_logprice,mean, R = 100000)
+two.boot.mean.bshatconv = two.boot(stratified_pricebody_hat$normalized_gradlogmedian,stratified_pricebody_con$normalized_gradlogmedian,mean, R = 100000)
 ## Two Bootstrap : Difference in means of Sedan & Convertible
-two.boot.mean.bssedconv = two.boot(stratified_pricebody_sed$normalized_logprice,stratified_pricebody_con$normalized_logprice,mean, R = 100000)
+two.boot.mean.bssedconv = two.boot(stratified_pricebody_sed$normalized_gradlogmedian,stratified_pricebody_con$normalized_gradlogmedian,mean, R = 100000)
 ## Two Bootstrap : Difference in means of Wagon & Convertible
-two.boot.mean.bswagconv = two.boot(stratified_pricebody_wag$normalized_logprice,stratified_pricebody_con$normalized_logprice,mean, R = 100000)
+two.boot.mean.bswagconv = two.boot(stratified_pricebody_wag$normalized_gradlogmedian,stratified_pricebody_con$normalized_gradlogmedian,mean, R = 100000)
 ## Two Bootstrap : Difference in means of Hatchback & Hardtop
-two.boot.mean.bshathar = two.boot(stratified_pricebody_hat$normalized_logprice,stratified_pricebody_har$normalized_logprice,mean, R = 100000)
+two.boot.mean.bshathar = two.boot(stratified_pricebody_hat$normalized_gradlogmedian,stratified_pricebody_har$normalized_gradlogmedian,mean, R = 100000)
 ## Two Bootstrap : Difference in means of Sedan & Hardtop
-two.boot.mean.bssedhar = two.boot(stratified_pricebody_sed$normalized_logprice,stratified_pricebody_har$normalized_logprice,mean, R = 100000)
+two.boot.mean.bssedhar = two.boot(stratified_pricebody_sed$normalized_gradlogmedian,stratified_pricebody_har$normalized_gradlogmedian,mean, R = 100000)
 ## Two Bootstrap : Difference in means of Wagon & Hardtop
-two.boot.mean.bswaghar = two.boot(stratified_pricebody_wag$normalized_logprice,stratified_pricebody_har$normalized_logprice,mean, R = 100000)
+two.boot.mean.bswaghar = two.boot(stratified_pricebody_wag$normalized_gradlogmedian,stratified_pricebody_har$normalized_gradlogmedian,mean, R = 100000)
 ## Two Bootstrap : Difference in means of Sedan & Hatchback
-two.boot.mean.bssedhat = two.boot(stratified_pricebody_sed$normalized_logprice,stratified_pricebody_hat$normalized_logprice,mean, R = 100000)
+two.boot.mean.bssedhat = two.boot(stratified_pricebody_sed$normalized_gradlogmedian,stratified_pricebody_hat$normalized_gradlogmedian,mean, R = 100000)
 ## Two Bootstrap : Difference in means of Wagon & Hatchback
-two.boot.mean.bswaghat = two.boot(stratified_pricebody_wag$normalized_logprice,stratified_pricebody_hat$normalized_logprice,mean, R = 100000)
+two.boot.mean.bswaghat = two.boot(stratified_pricebody_wag$normalized_gradlogmedian,stratified_pricebody_hat$normalized_gradlogmedian,mean, R = 100000)
 ## Two Bootstrap : Difference in means of Wagon & Sedan
-two.boot.mean.bswagsed = two.boot(stratified_pricebody_wag$normalized_logprice,stratified_pricebody_sed$normalized_logprice,mean, R = 100000)
+two.boot.mean.bswagsed = two.boot(stratified_pricebody_wag$normalized_gradlogmedian,stratified_pricebody_sed$normalized_gradlogmedian,mean, R = 100000)
 
 # Retrieve mean for numerical comparision between the means using ONE BOOT method.
 NumericBoostrapMeanbsconv <- mean.boot.bsconv$t0
