@@ -5,6 +5,7 @@ library(dplyr)
 library(repr)
 source('Loaddata.R')
 source('ZScoreNormalise.R')
+source('plotsvdreg.R')
 # Load and cleanse the csv file.
 allages = Loaddata('all-ages.csv')
 gradstudents = Loaddata('grad-students.csv')
@@ -73,9 +74,10 @@ ggplot(recentgrads, aes(x=reorder(Major_category,Major_category, function(x) -le
   xlab('Major Category')
 theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
+
 #Create boxplot to compare two variables.
 ggplot(numeric_recentgrads, aes(x = factor(Major_category_n), y = normalized_gradundemploymentrate)) + geom_boxplot() + 
-         xlab('Major Category') + ylab('Normalized Unemployment Rate ') + ggtitle('Unemployment rate by Major Category')
+  xlab('Major Category') + ylab('Normalized Unemployment Rate ') + ggtitle('Unemployment rate by Major Category')
 
 #Create boxplot to compare two variables.
 #Engineering s the top grosser as a category.
@@ -118,6 +120,8 @@ summary(aov_majcat_unemploy)
 tukey_majcat_medianpay = TukeyHSD(aov_majcat_medianpay)  # Tukey's Range test:
 tukey_majcat_medianpay
 df_tukey_medianpay <- data.frame(tukey_majcat_medianpay$`groupedbyMajorCategory$Major_category`)
+df_tukey_medianpay[order(df_tukey_medianpay$p.adj),]
+
 #98 out of 120 comparison reject the hypothesis
 #Tukey Analysis for unemployment per major category.
 #You can see few categories wherein null hypothesis can be rejected
@@ -128,30 +132,40 @@ df_tukey_unemploy <- data.frame((tukey_majcat_unemploy$`groupedbyMajorCategory$M
 # These numbers match overall analysis of ANOVA.
 
 
-#Create a model on median pay base don linear regression.
-lm.medianpay = lm(numeric_recentgrads$normalized_gradmedian_round ~ . - Median - Rank - 1 -normalized_gradmedian_round_1 - normalized_gradundemploymentrate - normalized_gradunemployednum - normalized_grademployednum, data = numeric_recentgrads)
+#Create a model on median pay based on linear regression.
+lm.medianpay = lm(numeric_recentgrads$normalized_gradmedian_round ~ . - Median - Rank - 1 -normalized_gradmedian - normalized_gradundemploymentrate - normalized_gradunemployednum - normalized_grademployednum, data = numeric_recentgrads)
 summary(lm.medianpay)
 plot(lm.medianpay)
 
-#Apply Step Wise Regression,
+#Create a model on unemployment based on linear regression.
+lm.unemployment = lm(numeric_recentgrads$normalized_gradundemploymentrate ~ . - Unemployment_rate - Rank - 1 -normalized_gradmedian - normalized_gradundemploymentrate - normalized_gradunemployednum - normalized_grademployednum -normalized_gradmedian_round, data = numeric_recentgrads)
+summary(lm.unemployment)
+plot(lm.unemployment)
+
+#Apply Step Wise Regression on median pay
 library(MASS)
-lm.step = stepAIC(lm.medianpay, direction = 'both')
-lm.step$anova # ANOVA of the result 
-summary(lm.step) # Summary of the best model
-plot(lm.step)
+lm.step.medianpay = stepAIC(lm.medianpay, direction = 'both')
+lm.step.medianpay$anova # ANOVA of the result 
+summary(lm.step.medianpay) # Summary of the best model
+plot(lm.step.medianpay)
 
+#Apply Step Wise Regression on unemployment rate
+library(MASS)
+lm.step.unemploymentrate = stepAIC(lm.unemployment, direction = 'both')
+lm.step.unemploymentrate$anova # ANOVA of the result 
+summary(lm.step.unemploymentrate) # Summary of the best model
+plot(lm.step.unemploymentrate)
 
-# Apply Singular Value Decomposition using Pseudo Inverse.
-# This data frame consists of number of catgegorical variables,in order to work with a model matrix we first need to convert these categorical 
-#variables into binary indicator variables.
+# Apply Singular Value Decomposition using Pseudo Inverse for median pay
 # Remove intercept and redundant columns
-mod.mat = model.matrix(numeric_recentgrads$normalized_gradmedian_round ~ . - Median - Rank - 1 -normalized_gradmedian - normalized_gradundemploymentrate - normalized_gradunemployednum - normalized_grademployednum, data = numeric_recentgrads)
+# Copy dataframe so I can use the same function for both median pay and unemployment rate
+df <- numeric_recentgrads
+mod.mat <- model.matrix(df$normalized_gradmedian_round ~ . - Median - Rank - 1 -normalized_gradmedian - normalized_gradundemploymentrate - normalized_gradunemployednum - normalized_grademployednum, data = df)
 M = as.matrix(mod.mat)
 head(M)
 MTM = t(M) %*% M
 head(MTM)
 dim(MTM)
-#compute the SVD of model matrix M (195 * 60)
 # Examine the singular values and in the process check for "Rank Deficiency".
 mSVD <- svd(MTM)
 #Validate whether singular vectors are orthogonal.
@@ -163,78 +177,94 @@ diagSDV <- mSVD$d
 diagSDV
 #By looking at singlular values we can now deduce that this matrix is rank deficient with 1 value below zero.
 # Let us now compute the pseudo inverse of MTM matrix.
-cat('Compute and print the inverse singular value matrix')
+#cat('Compute and print the inverse singular value matrix')
 d.trim = rep(0, 18)
 d.trim[1:17] =1/ mSVD$d[1:17]
 mD = diag(d.trim)
-cat('Compute and print the pseudo inverse')
+#cat('Compute and print the pseudo inverse')
 mInv = mSVD$v %*% mD %*% t(mSVD$u)
-cat('Compute and print the dimensions of the matrix MInvM')
+#cat('Compute and print the dimensions of the matrix MInvM')
 MInvM = mInv %*% t(M)
 dim(MInvM)
 
 # Compute the vector of model coefficients by multiplying MInvM with normalized median pay.
-b <- MInvM %*% numeric_recentgrads$normalized_gradmedian_round
-dim(b)
+b <- MInvM %*% df$normalized_gradmedian_round
+coeffcountmedian <- nrow(b)
 
 # Now we can evaluate the model using this vector of model coefficient.
-numeric_recentgrads$score = M %*% b + mean(numeric_recentgrads$normalized_gradmedian_round)
-numeric_recentgrads$resids = numeric_recentgrads$score - numeric_recentgrads$normalized_gradmedian_round
-
+df$score = M %*% b + mean(df$normalized_gradmedian_round)
+df$resids = df$score - df$normalized_gradmedian_round
 require(repr)
 options(repr.pmales.extlot.width=8, repr.plot.height=4)
+#Calling function for median
+plot.svd.reg(df,coeffcountmedian)
 
-plot.svd.reg <- function(df, k = 4){
-  require(ggplot2)
-  require(gridExtra)
-  
-  p1 <- ggplot(df) + 
-    geom_point(aes(score, resids), size = 2) + 
-    stat_smooth(aes(score, resids)) +
-    ggtitle('Residuals vs. fitted values')
-  
-  p2 <- ggplot(df, aes(resids)) +
-    geom_histogram(aes(y = ..density..)) +
-    geom_density(color = 'red', fill = 'red', alpha = 0.2) +
-    ggtitle('Histogram of residuals')
-  
-  qqnorm(df$resids)
-  
-  grid.arrange(p1, p2, ncol = 2)
-  
-  df$std.resids = sqrt((df$resids - mean(df$resids))^2)  
-  
-  p3 = ggplot(df) + 
-    geom_point(aes(score, std.resids), size = 2) + 
-    stat_smooth(aes(score, std.resids)) +
-    ggtitle('Standardized residuals vs. fitted values')
-  print(p3) 
-  
-  n = nrow(df)
-  Ybar = mean(df$normalized_gradmedian_round)
-  SST <- sum((df$normalized_gradmedian_round - Ybar)^2)
-  SSR <- sum(df$resids * df$resids)
-  SSE = SST - SSR
-  cat(paste('SSE =', as.character(SSE), '\n'))
-  cat(paste('SSR =', as.character(SSR), '\n'))
-  cat(paste('SST =', as.character(SSE + SSR), '\n'))
-  cat(paste('RMSE =', as.character(SSE/(n - 2)), '\n'))
-  
-  adjR2  <- 1.0 - (SSR/SST) * ((n - 1)/(n - k - 1))
-  cat(paste('Adjusted R^2 =', as.character(adjR2)), '\n')
-}
+# Apply Singular Value Decomposition using Pseudo Inverse for unemployment
+# Remove intercept and redundant columns
+# Copy dataframe so I can use the same function for both median pay and unemployment rate
+df1 <- numeric_recentgrads
+mod.mat <- model.matrix(df1$normalized_gradundemploymentrate ~ . - Unemployment_rate - Rank - 1 -normalized_gradmedian - normalized_gradunemployednum - normalized_grademployednum, data = df1)
+M = as.matrix(mod.mat)
+head(M)
+MTM = t(M) %*% M
+head(MTM)
+dim(MTM)
+# Examine the singular values and in the process check for "Rank Deficiency".
+mSVD <- svd(MTM)
+#Validate whether singular vectors are orthogonal.
+uOrth <- t(mSVD$u) %*% mSVD$u
+vOrth <- mSVD$v %*% t(mSVD$v)
+uOrthSingLeftVector <- mSVD$u
+vOrthSingRightVector <- mSVD$v
+diagSDV <- mSVD$d
+diagSDV
+#By looking at singlular values we can now deduce that this matrix is rank deficient with 1 value below zero.
+# Let us now compute the pseudo inverse of MTM matrix.
+#cat('Compute and print the inverse singular value matrix')
+d.trim = rep(0, 19)
+d.trim[1:18] =1/ mSVD$d[1:18]
+mD = diag(d.trim)
+#cat('Compute and print the pseudo inverse')
+mInv = mSVD$v %*% mD %*% t(mSVD$u)
+#cat('Compute and print the dimensions of the matrix MInvM')
+MInvM = mInv %*% t(M)
+dim(MInvM)
 
-plot.svd.reg(numeric_recentgrads)
+# Compute the vector of model coefficients by multiplying MInvM with normalized unemployment rate.
+b <- MInvM %*% df1$normalized_gradundemploymentrate
+coeffcountunemploy <- nrow(b)
 
-#Elastic Net Regression.
+# Now we can evaluate the model using this vector of model coefficient.
+df1$score = M %*% b + mean(df1$normalized_gradundemploymentrate)
+df1$resids = df$score - df1$normalized_gradundemploymentrate
+require(repr)
+options(repr.pmales.extlot.width=8, repr.plot.height=4)
+#Calling function for employment rate
+plot.svd.reg(df1,coeffcountunemploy)
+
+#Elastic Net Regression on median pay
 require(glmnet)
-b = as.matrix(numeric_recentgrads$normalized_gradmedian_round)
-mod.ridge = glmnet(M, b, family = 'gaussian', nlambda = 20, alpha = .5)
+b = as.matrix(df$normalized_gradmedian_round)
+mod.ridge = glmnet(M, b, family = 'gaussian', nlambda = 100, alpha = .5)
 plot(mod.ridge, xvar = 'lambda', label = TRUE)
 plot(mod.ridge, xvar = 'dev', label = TRUE)
 
 #Let us now evaluate the model created by elastice net regression by calculating the score using predict function.
-numeric_recentgrads$score = predict(mod.ridge, newx = M)[, 20]
-numeric_recentgrads$resids = numeric_recentgrads$score_elastic - numeric_recentgrads$normalized_gradmedian_round
+df$score = predict(mod.ridge, newx = M)[, 20]
+df$resids = df$score - df$normalized_gradmedian_round
 
-plot.svd.reg(numeric_recentgrads)
+plot.svd.reg(df,coeffcountmedian)
+
+
+#Elastic Net Regression on unemployment
+require(glmnet)
+b = as.matrix(df1$normalized_gradundemploymentrate)
+mod.ridge = glmnet(M, b, family = 'gaussian', nlambda = 100, alpha = .5)
+plot(mod.ridge, xvar = 'lambda', label = TRUE)
+plot(mod.ridge, xvar = 'dev', label = TRUE)
+
+#Let us now evaluate the model created by elastice net regression by calculating the score using predict function.
+df1$score = predict(mod.ridge, newx = M)[, 20]
+df1$resids = df1$score - df1$normalized_gradundemploymentrate
+
+plot.svd.reg(df1,coeffcountunemploy)
